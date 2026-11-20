@@ -1,0 +1,28 @@
+---
+Checks: >
+  -*,
+  clang-analyzer-*,
+  bugprone-*,
+  cert-*,
+  concurrency-*,
+  misc-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-reserved-identifier,
+  -cert-dcl37-c,
+  -cert-dcl51-cpp,
+  -readability-identifier-length,
+  -readability-implicit-bool-conversion,
+  -readability-magic-numbers,
+  -readability-braces-around-statements,
+  -readability-math-missing-parentheses,
+  -readability-isolate-declaration,
+  -readability-use-concise-preprocessor-directives
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(^|/)(include|src|tests)/'
+SystemHeaders: false
+FormatStyle: file
+...

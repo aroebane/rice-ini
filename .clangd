@@ -1,0 +1,12 @@
+CompileFlags:
+  Remove:
+    - -Werror
+    - -Werror=*
+
+Diagnostics:
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
+
+Index:
+  Background: Build
+  StandardLibrary: Yes

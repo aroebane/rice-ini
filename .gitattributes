@@ -1,0 +1,12 @@
+* text=auto eol=lf
+
+*.c text diff=cpp
+*.h text diff=cpp
+*.cpp text diff=cpp
+*.in text
+*.md text diff=markdown
+Makefile text
+
+*.a binary
+*.o binary
+*.so binary
