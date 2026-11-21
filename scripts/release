@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# Cut the next release: bump VERSION, commit, sign the tag, push the commit and the tag together.
+#
+#   scripts/release patch|minor|major [--plan] [--no-check] [--no-push] [--yes]
+#
+#   --plan      print what would happen and stop (changes nothing)
+#   --no-check  skip `make check`
+#   --no-push   stop after the local signed tag; the commit and the tag stay local
+#   --yes       do not ask before pushing
+#
+# VERSION holds the version of the latest release (the tag without its v); meson.build reads it.
+# The signing key is the repository's own `user.signingkey`, and it must be in the current
+# GNUPGHOME (for the release key: export GNUPGHOME=~/.local/share/gnupg/releases). Signing asks for
+# the key's passphrase. Environment: RELEASE_REMOTE (default origin), RELEASE_BRANCH (default
+# master). Nothing is pushed unless every step before it passed; a failure before the push
+# removes the release commit and the tag again.
+set -euo pipefail
+
+root=$(realpath -e -- "$(dirname -- "${BASH_SOURCE[0]}")/..")
+cd -- "$root"
+remote=${RELEASE_REMOTE:-origin} branch=${RELEASE_BRANCH:-master}
+
+die() { printf 'release: %s\n' "$*" >&2; exit 1; }
+say() { printf '\n== %s\n' "$*"; }
+usage() { sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//' >&2; exit "${1:-2}"; }
+
+bump='' plan=0 check=1 push=1 yes=0
+for argument in "$@"; do
+  case $argument in
+    patch|minor|major) [[ -z $bump ]] || usage; bump=$argument ;;
+    --plan) plan=1 ;;
+    --no-check) check=0 ;;
+    --no-push) push=0 ;;
+    --yes) yes=1 ;;
+    -h|--help) usage 0 ;;
+    *) usage ;;
+  esac
+done
+[[ -n $bump ]] || usage
+
+# ---- preconditions -------------------------------------------------------------------------------
+for dependency in git gpg make; do command -v "$dependency" >/dev/null || die "$dependency is required."; done
+[[ $(git symbolic-ref --short HEAD) == "$branch" ]] || die "not on $branch."
+if [[ -n $(git status --porcelain) ]]; then
+  (( plan )) || die 'the working tree is not clean; commit or stash first.'
+  printf '%s\n' 'release: note: the working tree is not clean; a real release would refuse.' >&2
+fi
+
+current=$(<VERSION)
+[[ $current =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || die "VERSION is not MAJOR.MINOR.PATCH: $current"
+major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]} patch=${BASH_REMATCH[3]}
+case $bump in
+  major) next="$((major + 1)).0.0" ;;
+  minor) next="$major.$((minor + 1)).0" ;;
+  patch) next="$major.$minor.$((patch + 1))" ;;
+esac
+tag=v$next
+! git rev-parse -q --verify "refs/tags/$tag" >/dev/null || die "tag $tag already exists."
+
+key=$(git config --get user.signingkey || true)
+key=${key%\!}
+[[ -n $key ]] || die 'user.signingkey is not set in this repository.'
+gpg --list-secret-keys --with-colons "$key" >/dev/null 2>&1 ||
+  die "signing key $key is not in GNUPGHOME=${GNUPGHOME:-unset}; export GNUPGHOME=~/.local/share/gnupg/releases"
+if (( push )); then
+  if ! git remote get-url "$remote" >/dev/null 2>&1; then
+    (( plan )) || die "no remote named $remote; add one, or use --no-push."
+    printf 'release: note: no remote named %s; a real release would refuse (or use --no-push).\n' "$remote" >&2
+  fi
+fi
+
+# Every local commit must carry a good signature before anything is done: a push publishes them,
+# and signing later means rewriting them. Local = not yet on the remote branch (all, if unpublished).
+if git rev-parse -q --verify "refs/remotes/$remote/$branch" >/dev/null; then base=$remote/$branch range=$base..HEAD
+else base=--root range=HEAD; fi
+unsigned=()
+while read -r commit; do
+  git verify-commit "$commit" >/dev/null 2>&1 || unsigned+=("$(git log -1 --format='  %h %s' "$commit")")
+done < <(git rev-list "$range")
+if (( ${#unsigned[@]} )); then
+  printf 'release: %d local commit(s) without a good signature:\n' "${#unsigned[@]}" >&2
+  printf '%s\n' "${unsigned[@]}" >&2
+  printf "release: sign them: git rebase %s --exec 'git commit --amend --no-edit -S'\n" "$base" >&2
+  (( plan )) || exit 1
+fi
+
+say "release $current -> $next ($bump)"
+printf 'branch   %s\nsigning  %s (GNUPGHOME=%s)\n' "$branch" "$key" "${GNUPGHOME:-unset}"
+(( push )) && printf 'push     %s: %s and %s, atomically\n' "$remote" "$branch" "$tag" || printf 'push     no\n'
+(( check )) && printf 'check    make check\n' || printf 'check    skipped\n'
+(( plan )) && exit 0
+
+# ---- check ---------------------------------------------------------------------------------------
+if (( check )); then
+  say 'make check'
+  make check
+fi
+if (( push && ! yes )); then
+  read -r -p "Create and push $tag? [y/N] " answer
+  [[ $answer == y || $answer == Y ]] || die 'aborted; nothing changed.'
+fi
+
+# ---- commit and tag (undone if anything fails before the push) -------------------------------------
+original=$(git rev-parse HEAD) made=''
+undo() {
+  git tag -d "$tag" >/dev/null 2>&1 || true
+  if [[ -n $made && $(git rev-parse HEAD) == "$made" ]]; then git reset -q --hard "$original"; fi
+  printf 'release: failed; the release commit and the tag were removed.\n' >&2
+}
+trap undo ERR
+
+say "VERSION $next, commit, signed tag"
+printf '%s\n' "$next" > VERSION
+git add VERSION
+git commit -q -m "Release $tag"
+made=$(git rev-parse HEAD)
+git tag -s "$tag" -m "release $tag"
+git verify-tag "$tag"
+
+if (( ! push )); then
+  trap - ERR
+  say "done locally; push with: git push --atomic $remote $branch $tag"
+  exit 0
+fi
+say "push $remote"
+git push --atomic "$remote" "$branch" "$tag"
+trap - ERR
+say "released $tag"

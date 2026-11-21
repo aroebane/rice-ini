@@ -24,6 +24,9 @@
 !/src/
 !/src/*.c
 
+!/scripts/
+!/scripts/release
+
 !/tests/
 !/tests/meson.build
 !/tests/*.c
