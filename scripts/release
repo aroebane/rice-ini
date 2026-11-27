@@ -10,7 +10,7 @@
 #
 # VERSION holds the version of the latest release (the tag without its v); meson.build reads it.
 # The signing key is the repository's own `user.signingkey`, and it must be in the current
-# GNUPGHOME (for the release key: export GNUPGHOME=~/.local/share/gnupg/releases). Signing asks for
+# GNUPGHOME (export GNUPGHOME to the GnuPG home that holds the release key). Signing asks for
 # the key's passphrase. Environment: RELEASE_REMOTE (default origin), RELEASE_BRANCH (default
 # master). Nothing is pushed unless every step before it passed; a failure before the push
 # removes the release commit and the tag again.
@@ -61,7 +61,7 @@ key=$(git config --get user.signingkey || true)
 key=${key%\!}
 [[ -n $key ]] || die 'user.signingkey is not set in this repository.'
 gpg --list-secret-keys --with-colons "$key" >/dev/null 2>&1 ||
-  die "signing key $key is not in GNUPGHOME=${GNUPGHOME:-unset}; export GNUPGHOME=~/.local/share/gnupg/releases"
+  die "signing key $key is not in GNUPGHOME=${GNUPGHOME:-unset}; export GNUPGHOME to the GnuPG home that holds it."
 if (( push )); then
   if ! git remote get-url "$remote" >/dev/null 2>&1; then
     (( plan )) || die "no remote named $remote; add one, or use --no-push."
